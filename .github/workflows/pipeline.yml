@@ -1,0 +1,48 @@
+name: Deal Pipeline
+
+on:
+  schedule:
+    # Alle 30 Minuten
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deal-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SCRAPE_MAX_PAGES: '3'
+      SCRAPE_HEADLESS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+
+      # Aktive Scraper: fortfahren auch wenn einer scheitert (Chrono24 kann 403 werfen)
+      - name: Scrape Chrono24
+        run: npm run scrape:chrono24 || true
+      - name: Scrape eBay
+        run: npm run scrape:ebay || true
+      - name: Scrape Chronext
+        run: npm run scrape:chronext || true
+      - name: Scrape Uhren2000
+        run: npm run scrape:uhren2000 || true
+      - name: Scrape Marks
+        run: npm run scrape:marks || true
+
+      - name: Compute Deals
+        run: npm run compute-deals
+      - name: Post Deals to Discord
+        run: npm run post-deals 30 15

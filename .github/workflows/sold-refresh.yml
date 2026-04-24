@@ -1,0 +1,31 @@
+name: Sold Refresh
+
+on:
+  schedule:
+    # Täglich um 03:00 UTC (05:00 Berliner Zeit)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: sold-refresh
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SCRAPE_MAX_PAGES: '15'
+      SCRAPE_HEADLESS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - name: Scrape eBay Sold
+        run: npm run scrape-sold
