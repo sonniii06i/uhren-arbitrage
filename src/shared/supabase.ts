@@ -83,17 +83,22 @@ export async function deactivateStale(source: string, seenIds: string[], runStar
   const sb = supabase();
   const { data: stale, error } = await sb
     .from('listings')
-    .select('id, source, source_listing_id, url, ref, brand, model, year, has_box, has_papers, condition, price_eur, title')
+    .select('id, source, source_listing_id, url, ref, brand, model, year, has_box, has_papers, condition, price_eur, title, first_seen_at')
     .eq('source', source)
     .eq('active', true)
     .lt('last_seen_at', runStartedAt.toISOString());
   if (error) throw error;
   if (!stale || stale.length === 0) return 0;
 
-  // Dealer-Sites: als impliziten Sold speichern
+  // Sold-Inference nur für Listings die reif sind (>48h im DB).
+  // Jüngere sind zu oft Scrape-Misses (z.B. Chrono24 Sub-Model außerhalb
+  // unserer Rotation), daher NICHT als sold zu werten.
+  const MATURITY_HOURS = 48;
+  const maturityCutoff = new Date(Date.now() - MATURITY_HOURS * 3600 * 1000);
+
   if (DEALER_SOURCES.includes(source)) {
     const soldRows = stale
-      .filter(r => r.ref && r.price_eur)
+      .filter(r => r.ref && r.price_eur && r.first_seen_at && new Date(r.first_seen_at) < maturityCutoff)
       .map(r => ({
         source: r.source,
         source_listing_id: `inferred_${r.source_listing_id}`,

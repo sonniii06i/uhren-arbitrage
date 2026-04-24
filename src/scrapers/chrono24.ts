@@ -135,7 +135,7 @@ export class Chrono24Scraper {
   source: Source = 'chrono24';
   // Wir skippen hier Pagination pro Sub-Model — stattdessen breite Abdeckung:
   // viele Sub-Models × 1 Seite jedes. Gibt bessere Streuung als tief-vertikal.
-  maxSubModelsPerBrand = parseInt(process.env.CHRONO24_SUBMODELS ?? '20', 10);
+  maxSubModelsPerBrand = parseInt(process.env.CHRONO24_SUBMODELS ?? '40', 10);
 
   async run(): Promise<ScrapeResult> {
     const runStart = new Date();

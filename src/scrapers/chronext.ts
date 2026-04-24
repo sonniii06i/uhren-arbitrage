@@ -39,15 +39,20 @@ export class ChronextScraper extends BaseScraper {
         if (items.length === 0) break;
 
         for (const it of items) {
-          // Preis: erster "XXX €"-Match (strike-through UVP kommt danach)
           const priceMatch = it.text.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*€/);
           if (!priceMatch) continue;
           const price = parsePriceEur(priceMatch[1]!);
           if (!price) continue;
 
-          // Condition vor dem Brand-Namen: "Sehr Gut", "Gut", "Wie Neu", "Vintage"
           const condMatch = it.text.match(/^(Sehr Gut|Wie Neu|Vintage|Gut|Neu)(?=[A-Z])/);
           const condition = condMatch?.[1];
+
+          // Chronext-URL enthält Ref explizit: /rolex/datejust/126334/V1102743
+          // Parse: [/rolex, datejust, REF, V-ID] — zweitletztes vor /V ist die Ref
+          const pathParts = it.href.split('?')[0]!.split('/').filter(Boolean);
+          const vIdx = pathParts.findIndex(p => /^V\d+$/.test(p));
+          const refFromUrl = vIdx > 0 ? pathParts[vIdx - 1] : undefined;
+          const modelFromUrl = vIdx > 1 ? pathParts[vIdx - 2] : undefined;
 
           const fullUrl = it.href.startsWith('http') ? it.href : `https://www.chronext.de${it.href}`;
           yield {
@@ -58,6 +63,8 @@ export class ChronextScraper extends BaseScraper {
             description: it.text,
             priceEur: price,
             condition,
+            ref: refFromUrl?.toUpperCase(),
+            model: modelFromUrl,
             sellerType: 'dealer',
             sellerCountry: 'CH',
             images: it.imgSrc ? [it.imgSrc] : [],
