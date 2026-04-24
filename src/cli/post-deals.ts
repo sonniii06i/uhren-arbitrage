@@ -7,18 +7,50 @@ async function main() {
   const maxPosts = parseInt(process.argv[3] ?? '25', 10);
   const sb = supabase();
 
-  // Nur der NEUESTE Deal pro Listing. Wir posten nur wenn genau dieser
-  // neueste Deal-Snapshot noch nicht gepostet wurde (latest_deals-View
-  // liefert genau den zuletzt berechneten Score).
+  // Re-Post-Guard: ein Listing wird nur dann nochmal gepostet wenn
+  // (a) es seit 72h keinen Discord-Post mehr gab UND
+  // (b) die neue Discount-% mindestens 5 Prozentpunkte besser ist als beim letzten Post.
+  // Das verhindert Spam wenn die gleichen Listings jede 30min neu gescort werden.
+  const RE_POST_COOLDOWN_HOURS = 72;
+  const MIN_DISCOUNT_IMPROVEMENT = 5;
+
+  const cooldownCutoff = new Date(Date.now() - RE_POST_COOLDOWN_HOURS * 3600 * 1000).toISOString();
+  const { data: recentPosts } = await sb
+    .from('deals')
+    .select('listing_id, discount_pct, discord_posted_at')
+    .not('discord_posted_at', 'is', null)
+    .gte('discord_posted_at', cooldownCutoff);
+  const recentByListing = new Map<string, number>();
+  for (const r of recentPosts ?? []) {
+    const existing = recentByListing.get(r.listing_id);
+    const pct = Number(r.discount_pct);
+    if (existing == null || pct > existing) recentByListing.set(r.listing_id, pct);
+  }
+
   const { data: latest, error } = await sb
     .from('latest_deals')
     .select('*')
     .gte('score', minScore)
     .is('discord_posted_at', null)
     .order('score', { ascending: false })
-    .limit(maxPosts);
+    .limit(maxPosts * 3);
   if (error) throw error;
-  const deals = latest ?? [];
+
+  const deals = (latest ?? []).filter(d => {
+    const lastPostedDisc = recentByListing.get(d.listing_id);
+    if (lastPostedDisc == null) return true;
+    const newDisc = Number(d.discount_pct);
+    return newDisc - lastPostedDisc >= MIN_DISCOUNT_IMPROVEMENT;
+  }).slice(0, maxPosts);
+
+  // Für skipped Deals trotzdem discord_posted_at setzen, damit sie nicht in
+  // folgenden Runs erneut als "ungepostet" auftauchen
+  const skippedIds = (latest ?? [])
+    .filter(d => !deals.find(pick => pick.id === d.id))
+    .map(d => d.id);
+  if (skippedIds.length > 0) {
+    await sb.from('deals').update({ discord_posted_at: new Date().toISOString() }).in('id', skippedIds);
+  }
 
   if (error) throw error;
   if (!deals || deals.length === 0) {
