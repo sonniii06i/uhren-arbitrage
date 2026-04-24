@@ -20,8 +20,8 @@ const TAX_LOAD_PCT: Record<string, number> = {
   unknown: 0.045,
 };
 
-// Wenn Referenz aus Asking-Preisen kommt statt Sold-Preisen, Confidence runter
-const MIN_PROFIT_EUR = 500;
+// Schwelle damit kein Mikro-Deal den Channel zuspammt, aber kleinere Deals mitnimmt
+const MIN_PROFIT_EUR = 300;
 
 function confidenceFromSample(n: number, source: 'sold' | 'asking'): 'low' | 'medium' | 'high' {
   if (source === 'asking') {
@@ -69,8 +69,8 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
     if (discountPct <= 0) continue;
 
     // Sanity: Ask-Preis unter 40% der Referenz → Fake/Zubehör/Scam. Wir skippen.
-    // Echte Arbitrage-Deals liegen typisch bei 10-35% Discount, nicht 70%+
-    if (discountPct > 55) continue;
+    // Seltene Top-Deals (50-60% rabatt) durchlassen, alles drüber ist verdächtig
+    if (discountPct > 60) continue;
 
     const taxLoad = TAX_LOAD_PCT[l.tax_scheme ?? 'unknown'] ?? TAX_LOAD_PCT.unknown!;
     const netSaleProceeds = ref.median * (1 - SELL_FEE_PCT - taxLoad);

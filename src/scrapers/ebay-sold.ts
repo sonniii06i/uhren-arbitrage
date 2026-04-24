@@ -12,8 +12,14 @@ const BRAND_QUERIES = [
   'audemars piguet',
   'omega speedmaster',
   'omega seamaster',
+  'omega constellation',
   'tudor black bay',
   'tudor pelagos',
+  'cartier santos',
+  'cartier tank',
+  'panerai luminor',
+  'iwc portugieser',
+  'iwc pilot',
 ];
 
 export interface SoldScrapeResult {

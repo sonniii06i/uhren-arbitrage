@@ -51,4 +51,4 @@ jobs:
       - name: Compute Deals
         run: npm run compute-deals
       - name: Post Deals to Discord
-        run: npm run post-deals 30 15
+        run: npm run post-deals 20 15
