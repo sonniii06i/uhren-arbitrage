@@ -1,16 +1,17 @@
 import * as cheerio from 'cheerio';
 import type { Source, RawListing } from '../types.js';
-import { normalize } from '../shared/normalizer.js';
-import { parsePriceEur } from '../shared/normalizer.js';
+import { normalize, parsePriceEur } from '../shared/normalizer.js';
 import { upsertListing, deactivateStale } from '../shared/supabase.js';
 import type { ScrapeResult } from './base.js';
 
 // Chrono24 via FlareSolverr (Cloudflare-Bypass).
-// FlareSolverr läuft als Docker-Sidecar (lokal oder in GHA als Service-Container).
-// Standard-URL: http://localhost:8191/v1
 //
-// Bei Direkt-Zugriff ohne FlareSolverr antwortet Chrono24 mit 403 oder
-// Cloudflare-Challenge-Seite — deshalb keine Playwright-Fallback-Logik mehr.
+// Zwei-Stufen-Strategie:
+// 1. Brand-Landing (/{brand}/index.htm) → extract sub-model URLs mit /--mod{id}.htm
+//    (echte Listings werden auf Brand-Landing erst per JS nachgeladen, davor nur Model-Cards)
+// 2. Für jede Sub-Model-URL → individuelle Listings (hier steht die Ref-Nr im Titel)
+//
+// FlareSolverr läuft als Docker-Sidecar, Standard-URL http://localhost:8191/v1
 
 const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL ?? 'http://localhost:8191/v1';
 const SESSION_ID = 'uhren-arbitrage-chrono24';
@@ -69,7 +70,24 @@ async function destroySession(): Promise<void> {
   }).catch(() => {});
 }
 
-function parseListings(html: string): RawListing[] {
+// Extrahiert Sub-Model-URLs aus der Brand-Landing-Page.
+// Format: /{brand}/{slug}--mod{id}.htm oder /{brand}/{slug}--imod{id}.htm
+function extractSubModelUrls(html: string, brandSlug: string): string[] {
+  const $ = cheerio.load(html);
+  const urls = new Set<string>();
+  $('a[href*="--mod"], a[href*="--imod"]').each((_, node) => {
+    const href = $(node).attr('href') ?? '';
+    // Nur URLs die zum aktuellen Brand gehören
+    if (!href.includes(`/${brandSlug}/`)) return;
+    // Einzel-Listings (enthalten --id) rausfiltern
+    if (/--id\d+\.htm/.test(href)) return;
+    const fullUrl = href.startsWith('http') ? href : `https://www.chrono24.de${href}`;
+    urls.add(fullUrl);
+  });
+  return Array.from(urls);
+}
+
+function parseListingsFromHtml(html: string): RawListing[] {
   const $ = cheerio.load(html);
   const results: RawListing[] = [];
 
@@ -115,7 +133,9 @@ function parseListings(html: string): RawListing[] {
 
 export class Chrono24Scraper {
   source: Source = 'chrono24';
-  maxPages = parseInt(process.env.SCRAPE_MAX_PAGES ?? '3', 10);
+  // Wir skippen hier Pagination pro Sub-Model — stattdessen breite Abdeckung:
+  // viele Sub-Models × 1 Seite jedes. Gibt bessere Streuung als tief-vertikal.
+  maxSubModelsPerBrand = parseInt(process.env.CHRONO24_SUBMODELS ?? '20', 10);
 
   async run(): Promise<ScrapeResult> {
     const runStart = new Date();
@@ -131,29 +151,35 @@ export class Chrono24Scraper {
     const dryRun = process.env.DRY_RUN === '1';
     const seenIds: string[] = [];
 
-    // Health-Check auf FlareSolverr
     const hc = await fetch(FLARESOLVERR_URL.replace('/v1', '/health')).catch(() => null);
     if (!hc || !hc.ok) {
-      result.errors.push(`FlareSolverr nicht erreichbar auf ${FLARESOLVERR_URL}. Starte den Docker-Container: docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest`);
+      result.errors.push(`FlareSolverr nicht erreichbar auf ${FLARESOLVERR_URL}. Docker: docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest`);
       return result;
     }
 
     await createSession();
     try {
       for (const brand of BRANDS_TO_SCRAPE) {
-        for (let pageNum = 1; pageNum <= this.maxPages; pageNum++) {
-          const url = `https://www.chrono24.de/${brand.slug}/index.htm?sortorder=5&showpage=${pageNum}`;
-          const html = await flareSolverrGet(url);
-          if (!html) {
-            result.errors.push(`${brand.name} p${pageNum}: FlareSolverr-Request fehlgeschlagen`);
-            break;
+        // Stufe 1: Sub-Model-URLs entdecken
+        const landingUrl = `https://www.chrono24.de/${brand.slug}/index.htm`;
+        const landingHtml = await flareSolverrGet(landingUrl);
+        if (!landingHtml) {
+          result.errors.push(`${brand.name}: Brand-Landing nicht ladbar`);
+          continue;
+        }
+        const subModels = extractSubModelUrls(landingHtml, brand.slug).slice(0, this.maxSubModelsPerBrand);
+        console.log(`  ${brand.name}: ${subModels.length} Sub-Models gefunden`);
+
+        // Stufe 2: Pro Sub-Model-Seite die Listings scrapen
+        for (const modUrl of subModels) {
+          const modHtml = await flareSolverrGet(modUrl);
+          if (!modHtml) {
+            result.errors.push(`sub-model ${modUrl}: load failed`);
+            continue;
           }
-          const items = parseListings(html);
-          if (items.length === 0) {
-            console.log(`  ${brand.name} p${pageNum}: 0 items → ende`);
-            break;
-          }
-          console.log(`  ${brand.name} p${pageNum}: ${items.length} items`);
+          const items = parseListingsFromHtml(modHtml);
+          if (items.length === 0) continue;
+          console.log(`    ${modUrl.split('/').pop()}: ${items.length} listings`);
 
           for (const raw of items) {
             result.totalFound++;
@@ -161,7 +187,7 @@ export class Chrono24Scraper {
             if (!normalized) continue;
             result.totalRelevant++;
             if (dryRun) {
-              console.log(`  [dry] ${normalized.brand} ${normalized.ref} — ${normalized.priceEur}€`);
+              console.log(`    [dry] ${normalized.brand} ${normalized.ref} — ${normalized.priceEur}€`);
               seenIds.push(raw.sourceListingId);
               result.totalPersisted++;
               continue;
@@ -174,8 +200,7 @@ export class Chrono24Scraper {
               result.errors.push(`persist ${raw.sourceListingId}: ${(e as Error).message}`);
             }
           }
-          // Kurze Pause zwischen Seiten — FlareSolverr übernimmt Anti-Bot, wir müssen nicht stark drosseln
-          await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
+          await new Promise(r => setTimeout(r, 800 + Math.random() * 800));
         }
       }
 
