@@ -51,6 +51,7 @@ export async function upsertListing(l: NormalizedListing): Promise<void> {
     currency: l.currency ?? 'EUR',
     seller_type: l.sellerType,
     seller_country: l.sellerCountry,
+    tax_scheme: l.taxScheme,
     title: l.title,
     description: l.description,
     images: l.images ?? [],

@@ -49,6 +49,7 @@ async function main() {
       hasBox: listing.has_box ?? false,
       hasPapers: listing.has_papers ?? false,
       fullSet: listing.full_set ?? false,
+      taxScheme: listing.tax_scheme,
       askPriceEur: Number(deal.ask_price_eur),
       referencePriceEur: Number(deal.reference_price_eur),
       estimatedProfitEur: Number(deal.estimated_profit_eur),

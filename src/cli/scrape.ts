@@ -5,9 +5,13 @@ import { ChronextScraper } from '../scrapers/chronext.js';
 import { Uhren2000Scraper } from '../scrapers/uhren2000.js';
 import { MarksScraper } from '../scrapers/marks.js';
 import { HaegeleScraper } from '../scrapers/haegele.js';
-import type { BaseScraper } from '../scrapers/base.js';
+import type { ScrapeResult } from '../scrapers/base.js';
 
-const SCRAPERS: Record<string, () => BaseScraper> = {
+interface RunnableScraper {
+  run(): Promise<ScrapeResult>;
+}
+
+const SCRAPERS: Record<string, () => RunnableScraper> = {
   chrono24: () => new Chrono24Scraper(),
   ebay: () => new EbayScraper(),
   chronext: () => new ChronextScraper(),

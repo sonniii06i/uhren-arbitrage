@@ -8,6 +8,13 @@ export type Source =
 
 export type Tier = 'fast_mover' | 'mid' | 'slow';
 
+// Steuer-Schema für Weiterverkaufs-Berechnung:
+// - margin = §25a Differenzbesteuerung (nur Marge wird besteuert, ~3% effektiv)
+// - standard = Regelbesteuerung 19% MwSt ausweisbar (reklaimbar wenn wir Händler sind)
+// - private = Privatverkäufer (keine MwSt, nicht reklaimbar)
+// - unknown = nicht erkannt
+export type TaxScheme = 'margin' | 'standard' | 'private' | 'unknown';
+
 export interface RawListing {
   source: Source;
   sourceListingId: string;
@@ -25,6 +32,7 @@ export interface RawListing {
   condition?: string;
   sellerType?: string;
   sellerCountry?: string;
+  taxScheme?: TaxScheme;
   images?: string[];
   raw?: Record<string, unknown>;
 }
@@ -36,6 +44,7 @@ export interface NormalizedListing extends RawListing {
   year?: number;
   hasBox: boolean;
   hasPapers: boolean;
+  taxScheme: TaxScheme;
 }
 
 export interface BrandSpec {

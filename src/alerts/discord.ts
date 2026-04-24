@@ -15,6 +15,7 @@ export interface DiscordDeal {
   hasBox: boolean;
   hasPapers: boolean;
   fullSet: boolean;
+  taxScheme?: string | null;
   askPriceEur: number;
   referencePriceEur: number;
   estimatedProfitEur: number;
@@ -43,6 +44,15 @@ function describeSet(hasBox: boolean, hasPapers: boolean): string {
   if (hasBox) return 'mit Box (ohne Papers)';
   if (hasPapers) return 'mit Papers (ohne Box)';
   return 'ohne Box/Papers';
+}
+
+function describeTax(scheme?: string | null): string {
+  switch (scheme) {
+    case 'margin': return '§25a Differenzbesteuert (keine MwSt-Reklaim)';
+    case 'standard': return 'MwSt. ausweisbar (19% reklaimbar ✅)';
+    case 'private': return 'Privatverkäufer (Resale nur §25a)';
+    default: return 'Steuerschema unklar';
+  }
 }
 
 // Discord-Embed-Felder sind auf 1024 Zeichen limitiert, deshalb kompakt halten.
@@ -75,7 +85,7 @@ export async function postDeal(deal: DiscordDeal): Promise<void> {
     title: `🔔 ${title}`,
     url: deal.url,
     color,
-    description: `**${deal.discountPct.toFixed(1)}% unter Marktpreis** · ${setDesc} · ${deal.source.toUpperCase()} · Confidence: ${deal.confidence}`,
+    description: `**${deal.discountPct.toFixed(1)}% unter Marktpreis** · ${setDesc} · ${deal.source.toUpperCase()} · Confidence: ${deal.confidence}\n🧾 ${describeTax(deal.taxScheme)}`,
     fields: [
       { name: '💰 EK (Ask)', value: fmtEur(deal.askPriceEur), inline: true },
       { name: '📈 Potentieller VK', value: fmtEur(deal.referencePriceEur), inline: true },

@@ -1,5 +1,5 @@
 import { ALL_REFS, BRAND_ALIASES } from './brands.js';
-import type { RawListing, NormalizedListing } from '../types.js';
+import type { RawListing, NormalizedListing, TaxScheme } from '../types.js';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -114,6 +114,32 @@ function looksLikeAccessory(title: string): boolean {
   return ACCESSORY_KEYWORDS.some(kw => lower.includes(kw));
 }
 
+// Steuer-Schema aus Titel/Beschreibung erkennen.
+// Reihenfolge: explizite Margin-Schema-Hinweise > Standard-MwSt > Privat > unknown
+export function detectTaxScheme(text: string, sellerType?: string): TaxScheme {
+  const lower = text.toLowerCase();
+
+  // §25a Differenzbesteuerung — explizite Hinweise
+  if (/§\s*25\s*a|differenzbesteuer|margin\s+scheme|diff\.?\s*besteu|mwst\.?\s*nicht\s+ausweisbar|mwst\.?\s*nicht\s+ausgewiesen|no\s+vat\s+refund/i.test(lower)) {
+    return 'margin';
+  }
+
+  // Regelbesteuerung — MwSt ausgewiesen / ausweisbar
+  if (/mwst\.?\s*ausgewiesen|mwst\.?\s*ausweisbar|vat\s+included\s+and\s+refundable|19\s*%\s*mwst\s+ausweisbar|regelbesteu/i.test(lower)) {
+    return 'standard';
+  }
+
+  // Privatverkäufer
+  if (/\bprivat(?:\s+verk[äa]ufer|verkauf|anbieter)?\b|private\s+seller|\bprivate\s+sale/i.test(lower) || sellerType === 'private') {
+    return 'private';
+  }
+
+  // Händler ohne spezifischen Hinweis = vermutlich Margin (default für Second-Hand-Uhren-Händler)
+  if (sellerType === 'dealer') return 'margin';
+
+  return 'unknown';
+}
+
 export function normalize(raw: RawListing): NormalizedListing | null {
   const haystack = [raw.title, raw.description ?? '', raw.ref ?? ''].join(' ');
   const detected = raw.ref ? null : detectRef(haystack);
@@ -130,6 +156,7 @@ export function normalize(raw: RawListing): NormalizedListing | null {
   const model = raw.model ?? refInfo.model;
   const year = raw.year ?? detectYear(haystack);
   const bp = detectBoxPapers(haystack);
+  const taxScheme = raw.taxScheme ?? detectTaxScheme(haystack, raw.sellerType);
 
   return {
     ...raw,
@@ -139,5 +166,6 @@ export function normalize(raw: RawListing): NormalizedListing | null {
     year,
     hasBox: raw.hasBox ?? bp.hasBox ?? false,
     hasPapers: raw.hasPapers ?? bp.hasPapers ?? false,
+    taxScheme,
   };
 }

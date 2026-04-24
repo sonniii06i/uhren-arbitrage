@@ -4,6 +4,22 @@ import { findReferencePrice, findComparables } from './reference-price.js';
 // Bis 12% Verkaufskosten-Annahme (Chrono24 6.5% Provision + 1.9% Payment; eBay ~11%)
 const SELL_FEE_PCT = 0.12;
 
+// Effektive Steuerlast beim Wiederverkauf (relativ zum Verkaufspreis).
+// Beim Reverkauf müssen wir das gleiche Schema verwenden wie beim Einkauf:
+// - margin (§25a): 19% MwSt NUR auf die Marge. Bei typisch 15-30% Marge ≈ 3-6% des VK
+//   → konservativ 4.5% Steuerlast relativ zum VK
+// - private: wenn wir als Privatperson weiterverkaufen: 0% (aber gewerblich wäre ja Regel- oder Margin)
+//   → private Käufe sind für uns typisch Margin-Resale: 4.5%
+// - standard (MwSt ausweisbar): wir können 19% Input-MwSt reklaimen, aber auch 19% MwSt auf VK abführen.
+//   Netto-Steuerlast ~0% weil sich Input/Output ausgleicht — KLARER FINANZIERUNGSVORTEIL hier
+// - unknown: wir nehmen konservativ Margin an
+const TAX_LOAD_PCT: Record<string, number> = {
+  standard: 0,       // MwSt ausgewiesen + reklaimbar
+  margin: 0.045,     // ~3-6% effektiv auf Marge
+  private: 0.045,    // muss Margin-Resale sein
+  unknown: 0.045,
+};
+
 // Wenn Referenz aus Asking-Preisen kommt statt Sold-Preisen, Confidence runter
 const MIN_PROFIT_EUR = 500;
 
@@ -29,7 +45,7 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
 
   const { data: listings, error } = await sb
     .from('listings')
-    .select('id, ref, year, full_set, price_eur, has_box, has_papers')
+    .select('id, ref, year, full_set, price_eur, has_box, has_papers, tax_scheme')
     .eq('active', true)
     .not('ref', 'is', null)
     .not('price_eur', 'is', null)
@@ -56,7 +72,8 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
     // Echte Arbitrage-Deals liegen typisch bei 10-35% Discount, nicht 70%+
     if (discountPct > 55) continue;
 
-    const netSaleProceeds = ref.median * (1 - SELL_FEE_PCT);
+    const taxLoad = TAX_LOAD_PCT[l.tax_scheme ?? 'unknown'] ?? TAX_LOAD_PCT.unknown!;
+    const netSaleProceeds = ref.median * (1 - SELL_FEE_PCT - taxLoad);
     const estimatedProfit = netSaleProceeds - ask;
     if (estimatedProfit < MIN_PROFIT_EUR) continue;
 

@@ -14,11 +14,17 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        ports:
+          - 8191:8191
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      FLARESOLVERR_URL: 'http://localhost:8191/v1'
       SCRAPE_MAX_PAGES: '3'
       SCRAPE_HEADLESS: 'true'
     steps:
