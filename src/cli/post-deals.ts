@@ -14,24 +14,22 @@ async function main() {
   const RE_POST_COOLDOWN_HOURS = 72;
   const MIN_DISCOUNT_IMPROVEMENT = 5;
 
+  // Cooldown wird über listings.discord_last_posted_at getrackt (nicht via deal-rows)
+  // → vermeidet den Bug wo "skipped, mark posted" alle nachfolgenden Deals blockt.
   const cooldownCutoff = new Date(Date.now() - RE_POST_COOLDOWN_HOURS * 3600 * 1000).toISOString();
-  const { data: recentPosts } = await sb
-    .from('deals')
-    .select('listing_id, discount_pct, discord_posted_at')
-    .not('discord_posted_at', 'is', null)
-    .gte('discord_posted_at', cooldownCutoff);
+  const { data: recentlyPostedListings } = await sb
+    .from('listings')
+    .select('id, discord_last_posted_at, discord_last_posted_disc')
+    .gte('discord_last_posted_at', cooldownCutoff);
   const recentByListing = new Map<string, number>();
-  for (const r of recentPosts ?? []) {
-    const existing = recentByListing.get(r.listing_id);
-    const pct = Number(r.discount_pct);
-    if (existing == null || pct > existing) recentByListing.set(r.listing_id, pct);
+  for (const l of recentlyPostedListings ?? []) {
+    if (l.discord_last_posted_disc != null) recentByListing.set(l.id, Number(l.discord_last_posted_disc));
   }
 
   const { data: latest, error } = await sb
     .from('latest_deals')
     .select('*')
     .gte('score', minScore)
-    .is('discord_posted_at', null)
     .order('score', { ascending: false })
     .limit(maxPosts * 3);
   if (error) throw error;
@@ -42,15 +40,6 @@ async function main() {
     const newDisc = Number(d.discount_pct);
     return newDisc - lastPostedDisc >= MIN_DISCOUNT_IMPROVEMENT;
   }).slice(0, maxPosts);
-
-  // Für skipped Deals trotzdem discord_posted_at setzen, damit sie nicht in
-  // folgenden Runs erneut als "ungepostet" auftauchen
-  const skippedIds = (latest ?? [])
-    .filter(d => !deals.find(pick => pick.id === d.id))
-    .map(d => d.id);
-  if (skippedIds.length > 0) {
-    await sb.from('deals').update({ discord_posted_at: new Date().toISOString() }).in('id', skippedIds);
-  }
 
   if (error) throw error;
   if (!deals || deals.length === 0) {
@@ -95,7 +84,13 @@ async function main() {
 
     try {
       await postDeal(discordDeal);
-      await sb.from('deals').update({ discord_posted_at: new Date().toISOString() }).eq('id', deal.id);
+      const now = new Date().toISOString();
+      await sb.from('deals').update({ discord_posted_at: now }).eq('id', deal.id);
+      // Cooldown-Tracking auf Listing-Ebene: erfasst tatsächlichen Send-Zeitpunkt
+      await sb.from('listings').update({
+        discord_last_posted_at: now,
+        discord_last_posted_disc: deal.discount_pct,
+      }).eq('id', deal.listing_id);
       posted++;
       console.log(`  ✓ ${listing.brand} ${listing.ref} — ${deal.discount_pct}% — ${deal.estimated_profit_eur}€`);
     } catch (e) {
