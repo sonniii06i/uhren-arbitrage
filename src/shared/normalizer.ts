@@ -3,16 +3,46 @@ import type { RawListing, NormalizedListing, TaxScheme } from '../types.js';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Brand-Confirmation-Tokens pro Brand — alles was im Titel die Brand bestätigt
+const BRAND_CONFIRM_TOKENS: Record<string, string[]> = {
+  'Rolex': ['rolex'],
+  'Patek Philippe': ['patek', 'philippe'],
+  'Audemars Piguet': ['audemars', 'piguet', ' ap '],
+  'Omega': ['omega'],
+  'Tudor': ['tudor'],
+  'Cartier': ['cartier'],
+  'Panerai': ['panerai'],
+  'IWC': ['iwc', 'international watch'],
+};
+
 // Extrahiert Ref-Nr durch direkten Treffer auf unsere Fast-Mover-Liste.
-// Wir matchen bewusst nur bekannte Refs — unbekannte Refs lassen sich
-// nicht fair bepreisen und landen auf dem Ignorieren-Stapel.
+// - Word-Boundary-Match (verhindert dass "6000€" als Patek 6000 zählt)
+// - Kurze Refs (≤5 chars) brauchen Brand-Bestätigung im Text (verhindert
+//   Cross-Brand-Mismatches durch generische Zahlen)
+// - Längste Refs zuerst (verhindert "15400" vor "15400ST")
 export function detectRef(text: string): { brand: string; model: string; ref: string; tier: string } | null {
   const normalized = text.toLowerCase().replace(/\s+/g, ' ');
-  // Längste Refs zuerst matchen (verhindert dass "15400" vor "15400ST" trifft)
   const sorted = [...ALL_REFS].sort((a, b) => b.ref.length - a.ref.length);
   for (const entry of sorted) {
     const needle = entry.ref.toLowerCase();
-    if (normalized.includes(needle)) return entry;
+    // Boundary: vor und nach der Ref darf kein Buchstabe/Ziffer stehen.
+    // Z.B. "6000" matched ja in "16000" — wollen wir verhindern.
+    const re = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(needle)}(?:[^a-z0-9]|$)`, 'i');
+    if (!re.test(normalized)) continue;
+
+    // Bei kurzen Refs (≤5 chars Zahl/Buchstaben gemischt) muss die Brand
+    // explizit im Titel auftauchen, sonst zu hohes False-Positive-Risiko
+    if (entry.ref.length <= 5) {
+      const tokens = BRAND_CONFIRM_TOKENS[entry.brand] ?? [entry.brand.toLowerCase()];
+      const hasBrand = tokens.some(t => normalized.includes(t));
+      if (!hasBrand) continue;
+    }
+
+    return entry;
   }
   return null;
 }

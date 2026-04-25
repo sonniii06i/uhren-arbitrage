@@ -72,7 +72,6 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
     if (discountPct > 60) continue;
 
     // Sanity 2: Preis-Streuung der Vergleichsdaten zu groß → Referenz unzuverlässig.
-    // p75/p25-Verhältnis > 1.6 = Spread > 60% = Mondpreis-Risiko hoch
     if (ref.p75 > 0 && ref.p25 > 0) {
       const spreadRatio = ref.p75 / ref.p25;
       if (spreadRatio > 1.6) continue;
@@ -80,6 +79,24 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
 
     // Sanity 3: Asking-Fallback bei <8 Samples = zu wenig Belastbarkeit
     if (ref.source === 'asking' && ref.sampleSize < 8) continue;
+
+    // Sanity 4: Wenn es BILLIGERE aktive Listings für die gleiche Ref gibt,
+    // ist das hier kein echter Deal (User könnte günstiger woanders kaufen).
+    // Strict-FS-Match: nur Listings mit gleichem Set-Status & ähnlichem Jahr berücksichtigen.
+    let cheaperQuery = sb
+      .from('listings')
+      .select('price_eur')
+      .eq('ref', l.ref)
+      .eq('full_set', l.full_set)
+      .eq('active', true)
+      .neq('id', l.id)
+      .gt('price_eur', 500)
+      .lt('price_eur', ask)
+      .order('price_eur', { ascending: true })
+      .limit(1);
+    if (l.year) cheaperQuery = cheaperQuery.gte('year', l.year - 1).lte('year', l.year + 1);
+    const { data: cheaperRows } = await cheaperQuery;
+    if (cheaperRows && cheaperRows.length > 0) continue;
 
     const taxLoad = TAX_LOAD_PCT[l.tax_scheme ?? 'unknown'] ?? TAX_LOAD_PCT.unknown!;
     const netSaleProceeds = ref.median * (1 - SELL_FEE_PCT - taxLoad);
