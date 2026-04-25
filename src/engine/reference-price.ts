@@ -7,8 +7,20 @@ import { supabase } from '../shared/supabase.js';
 // 4. Active asking prices × 0.93 als letzte Rettung
 
 const ASKING_TO_SOLD_RATIO = 0.93;
-const FULL_SET_PREMIUM = 0.12; // Full-Set ist typischerweise 10-15% teurer
-const MIN_SAMPLE = 3;
+const FULL_SET_PREMIUM = 0.12;
+const MIN_SAMPLE = 5;
+// IQR-Outlier-Filter: alles außerhalb [Q1 - 1.5·IQR, Q3 + 1.5·IQR] fliegt raus.
+// Eliminert Diamant-Versionen, Auktions-Snipes, Fakes mit gleicher Ref-Nr.
+function rejectOutliersIQR(values: number[]): number[] {
+  if (values.length < 5) return values;
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1 = sorted[Math.floor(sorted.length * 0.25)]!;
+  const q3 = sorted[Math.floor(sorted.length * 0.75)]!;
+  const iqr = q3 - q1;
+  const lower = q1 - 1.5 * iqr;
+  const upper = q3 + 1.5 * iqr;
+  return sorted.filter(v => v >= lower && v <= upper);
+}
 
 interface ReferenceResult {
   median: number;
@@ -26,7 +38,9 @@ function percentile(sorted: number[], p: number): number {
 }
 
 function summarize(prices: number[], source: 'sold' | 'asking', matchTier: ReferenceResult['matchTier']): ReferenceResult {
-  const sorted = [...prices].sort((a, b) => a - b);
+  // IQR-Filter vor Median: typisch eliminiert 10-25% extreme Werte
+  const filtered = rejectOutliersIQR(prices);
+  const sorted = [...filtered].sort((a, b) => a - b);
   return {
     median: Math.round(percentile(sorted, 0.5)),
     p25: Math.round(percentile(sorted, 0.25)),

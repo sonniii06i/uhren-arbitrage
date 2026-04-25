@@ -63,14 +63,23 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
     const ask = Number(l.price_eur);
     const ref = await findReferencePrice(l.ref, l.year, l.full_set);
     if (!ref) continue;
-    if (ref.sampleSize < 3) continue;
+    if (ref.sampleSize < 5) continue;
 
     const discountPct = ((ref.median - ask) / ref.median) * 100;
     if (discountPct <= 0) continue;
 
-    // Sanity: Ask-Preis unter 40% der Referenz → Fake/Zubehör/Scam. Wir skippen.
-    // Seltene Top-Deals (50-60% rabatt) durchlassen, alles drüber ist verdächtig
+    // Sanity 1: extreme Discounts = Fake/Zubehör
     if (discountPct > 60) continue;
+
+    // Sanity 2: Preis-Streuung der Vergleichsdaten zu groß → Referenz unzuverlässig.
+    // p75/p25-Verhältnis > 1.6 = Spread > 60% = Mondpreis-Risiko hoch
+    if (ref.p75 > 0 && ref.p25 > 0) {
+      const spreadRatio = ref.p75 / ref.p25;
+      if (spreadRatio > 1.6) continue;
+    }
+
+    // Sanity 3: Asking-Fallback bei <8 Samples = zu wenig Belastbarkeit
+    if (ref.source === 'asking' && ref.sampleSize < 8) continue;
 
     const taxLoad = TAX_LOAD_PCT[l.tax_scheme ?? 'unknown'] ?? TAX_LOAD_PCT.unknown!;
     const netSaleProceeds = ref.median * (1 - SELL_FEE_PCT - taxLoad);
@@ -92,7 +101,13 @@ export async function scoreAllListings(): Promise<{ evaluated: number; dealsWrit
       sample_size: ref.sampleSize,
       confidence,
       ai_flags: null,
-      comparables: { items: comparables, ref_source: ref.source, match_tier: ref.matchTier },
+      comparables: {
+        items: comparables,
+        ref_source: ref.source,
+        match_tier: ref.matchTier,
+        p25: ref.p25,
+        p75: ref.p75,
+      },
     });
   }
 

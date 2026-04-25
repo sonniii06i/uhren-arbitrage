@@ -60,7 +60,8 @@ async function main() {
     if (!listing || !listing.active) continue;
 
     const firstImage = Array.isArray(listing.images) && listing.images.length > 0 ? listing.images[0] : undefined;
-    const comparables = (deal.comparables as { items?: Array<unknown> } | null)?.items ?? [];
+    const comparablesRaw = deal.comparables as { items?: Array<unknown>; p25?: number; p75?: number; ref_source?: string } | null;
+    const comparables = comparablesRaw?.items ?? [];
 
     const discordDeal: DiscordDeal = {
       brand: listing.brand ?? '',
@@ -73,6 +74,10 @@ async function main() {
       taxScheme: listing.tax_scheme,
       askPriceEur: Number(deal.ask_price_eur),
       referencePriceEur: Number(deal.reference_price_eur),
+      refP25: comparablesRaw?.p25,
+      refP75: comparablesRaw?.p75,
+      refSampleSize: deal.sample_size,
+      refSource: comparablesRaw?.ref_source,
       estimatedProfitEur: Number(deal.estimated_profit_eur),
       discountPct: Number(deal.discount_pct),
       confidence: deal.confidence,

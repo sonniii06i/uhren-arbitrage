@@ -18,6 +18,10 @@ export interface DiscordDeal {
   taxScheme?: string | null;
   askPriceEur: number;
   referencePriceEur: number;
+  refP25?: number;
+  refP75?: number;
+  refSampleSize?: number;
+  refSource?: string;
   estimatedProfitEur: number;
   discountPct: number;
   confidence: string;
@@ -88,9 +92,19 @@ export async function postDeal(deal: DiscordDeal): Promise<void> {
     description: `**${deal.discountPct.toFixed(1)}% unter Marktpreis** · ${setDesc} · ${deal.source.toUpperCase()} · Confidence: ${deal.confidence}\n🧾 ${describeTax(deal.taxScheme)}`,
     fields: [
       { name: '💰 EK (Ask)', value: fmtEur(deal.askPriceEur), inline: true },
-      { name: '📈 Potentieller VK', value: fmtEur(deal.referencePriceEur), inline: true },
+      {
+        name: '📈 Potentieller VK',
+        value: deal.refP25 && deal.refP75
+          ? `${fmtEur(deal.referencePriceEur)}\n_Range ${fmtEur(deal.refP25)}–${fmtEur(deal.refP75)}_`
+          : fmtEur(deal.referencePriceEur),
+        inline: true,
+      },
       { name: '✅ Potentieller Gewinn', value: `**${fmtEur(deal.estimatedProfitEur)}**`, inline: true },
-      { name: '📊 Vergleichbare verkaufte Uhren (gleiche Ref, ähnliche Condition)', value: buildComparablesField(deal.comparables), inline: false },
+      {
+        name: `📊 Vergleichbare verkaufte Uhren (n=${deal.refSampleSize ?? '?'}, ${deal.refSource === 'asking' ? 'Asking-Fallback ⚠️' : 'echte Sold-Daten'})`,
+        value: buildComparablesField(deal.comparables),
+        inline: false,
+      },
     ],
     ...(deal.imageUrl ? { thumbnail: { url: deal.imageUrl } } : {}),
     footer: { text: `uhren-arbitrage · ${new Date().toLocaleString('de-DE')}` },
